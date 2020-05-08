@@ -1,0 +1,10 @@
+sys systems
+system systems
+customer_a* customer_a_integ customer_a_stage customer_a_prod
+cai customer_a_integ
+cas customer_a_stage
+cap customer_a_prod
+cbs customer_b_stage
+cbp customer_b_prod
+stage customer_a_stage customer_b_stage
+prod customer_a_prod customer_b_prod

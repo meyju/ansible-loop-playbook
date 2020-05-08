@@ -1,0 +1,143 @@
+#!/usr/bin/env bash
+
+# MIT License
+#
+# Copyright (c) 2020 Julian Meyer <jm@julianmeyer.de>
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+# Script: ansible-loop-playbook
+# Info: run ansible-playbook in loop for multiple enviroments
+
+set -euo pipefail
+
+set +u
+# Setting some default values
+if [ -z "${ANSIBLE_FORCE_COLOR}" ]; then
+    # Force color because we pipe the output to get a final summary at the end
+    export ANSIBLE_FORCE_COLOR=true
+fi
+if [ -z "${ANSIBLE_LOOP_ALIAS_FILE}" ]; then
+    ANSIBLE_LOOP_ALIAS_FILE=".ansible-loop.aliases"
+fi
+if [ -z "${ANSIBLE_LOOP_OUT_DIR}" ]; then
+    OUT_DIR='.out'
+else
+    OUT_DIR=${ANSIBLE_LOOP_OUT_DIR}
+fi
+if [ -z "${ANSIBLE_LOOP_INVENTORY_FILE_SHEMA}" ]; then
+    FIND_INVENTORY_FILE='hosts*.yml'
+else
+    FIND_INVENTORY_FILE=${ANSIBLE_LOOP_INVENTORY_FILE_SHEMA}
+fi
+set -u
+
+function resolv_alias() {
+    if [[ -f "${ANSIBLE_LOOP_ALIAS_FILE}" ]]; then
+        if [[ "${1}" =~ ^!.* ]]; then
+            PREFIX="!"
+            CHECK=${1:1}
+        else
+            PREFIX=""
+            CHECK=${1}
+        fi
+
+        CHECK=`echo "${CHECK}" | sed -e 's/\*/\\\*/'`
+        ALIAS_RESOLVED=`grep -E "^${CHECK}\s" ${ANSIBLE_LOOP_ALIAS_FILE} | awk '{$1=""; print $0}' || echo $1`
+
+        for A in $ALIAS_RESOLVED; do
+            echo "${PREFIX}${A}"
+        done
+    else
+        echo $1
+    fi
+}
+
+function get_inventory_param() {
+    INVENTORY_ARG=""
+    for i in "$@"; do
+        case $i in
+            -i|--inventory|--inventory-file) shift; INVENTORY_ARG="${1}" ;;
+            *) shift ;;
+        esac
+    done
+    echo "${INVENTORY_ARG}"
+}
+
+function get_inventory_loops() {
+    RESULT=""
+    IFS=':' read -r -a array <<< "$@"
+    unset IFS
+
+    # resolve aliases/shortcuts
+    for ((i=0; i<"${#array[@]}"; ++i)); do
+        array[$i]=`resolv_alias "${array[i]}"`
+    done
+
+    # Get all inventory files if requested
+    all=false
+    for ((i=0; i<"${#array[@]}"; ++i)); do
+        if [[ "${array[i]}" == "all" ]]; then
+            RESULT=`find inventories -name "${FIND_INVENTORY_FILE}" | awk -F '/' '{print $2}' | sort`
+            all=true
+        fi
+    done
+
+    for I in ${array[@]}; do
+        # Remove denied inventorys
+        if [[ "${I}" =~ ^!.* ]]; then
+            RESULT=`echo $RESULT | sed -e "s/${I:1}//"`
+        else
+            if [[ "$all" == "false" ]]; then
+                RESULT=`echo "$RESULT ${I}"`
+            fi
+        fi
+    done
+
+    echo $RESULT
+}
+
+INVENTORY_PARAM=`get_inventory_param "$@"`
+INVENTORY=`get_inventory_loops "$INVENTORY_PARAM"`
+
+# Remove inventory argument from parameters to pass all other to ansible
+args=("${@}")
+for ((i=0; i<"${#args[@]}"; ++i)); do
+    case ${args[i]} in
+        -i|--inventory|--inventory-file) unset args[i]; unset args[i+1]; break ;;
+    esac
+done
+
+mkdir -p ${OUT_DIR}
+rm -f ${OUT_DIR}/* 2>/dev/null || true
+i=0
+
+# Now run ansible-playbook in loop
+for ITEM in $INVENTORY; do
+    I_FILE=`find inventories/${ITEM} -name "${FIND_INVENTORY_FILE}" -type f`
+    ansible-playbook -i ${I_FILE} "${args[@]}" | tee ${OUT_DIR}/${i}_${ITEM}.out
+    i=$((i+1))
+done
+
+if [[ $i -gt 1 ]]; then
+    echo ""
+    echo "******************************************************************************************************************"
+    echo "TOTAL RECAP ******************************************************************************************************"
+    cat ${OUT_DIR}/*.out | sed -n '/PLAY RECAP/,/^$/p' | sed -e '/PLAY RECAP/d' | sed -e '/^$/d'
+fi
