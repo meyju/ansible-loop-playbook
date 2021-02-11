@@ -1,6 +1,6 @@
 # ansible-loop-playbook
 
-Running `ansible-playbook` in loop for multiple inventorys. It is parsing the '-i|--inventory|--inventory-file' argument and looping over it. It works like the '-l' argument for specificing host limits, but it is translated to the inventory parameter.
+Running `ansible-playbook` in loop for multiple inventorys. It is parsing the '-i|--inventory|--inventory-file' argument and looping over it. It works like the '-l' argument for specificing host limits, but it is translated to the inventory parameter. Also `.vault_pass_*` files are loaded and passed to ansible, the suffix of the file will be used as vault ID label.
 
 After a run over multiple inventorys a total "PLAY RECAP" will be shown.
 

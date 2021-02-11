@@ -46,6 +46,9 @@ if [ -z "${ANSIBLE_LOOP_INVENTORY_FILE_SHEMA}" ]; then
 else
     FIND_INVENTORY_FILE=${ANSIBLE_LOOP_INVENTORY_FILE_SHEMA}
 fi
+if [ -z "${ANSIBLE_LOOP_LOAD_VAULT_FILES}" ]; then
+    export ANSIBLE_LOOP_LOAD_VAULT_FILES=true
+fi
 set -u
 
 function resolv_alias() {
@@ -113,8 +116,24 @@ function get_inventory_loops() {
     echo $RESULT
 }
 
+function get_vault_args() {
+    ARG=""
+    for V in `find . -name ".vault_pass_*" -maxdepth 2`; do
+        NAME=`echo "${V}" | awk -F'vault_pass_' '{print $2}'| tr -d '[:space:]'`
+        ARG="${ARG} --vault-id ${NAME}@${V}"
+    done
+    echo "${ARG}"
+}
+
 INVENTORY_PARAM=`get_inventory_param "$@"`
 INVENTORY=`get_inventory_loops "$INVENTORY_PARAM"`
+
+VAULT_ARGS=`get_vault_args`
+if [[ "${ANSIBLE_LOOP_LOAD_VAULT_FILES,,}" == "true" ]]; then
+    VAULT_ARGS=`get_vault_args`
+else
+    VAULT_ARGS=""
+fi
 
 # Remove inventory argument from parameters to pass all other to ansible
 args=("${@}")
@@ -131,7 +150,7 @@ i=0
 # Now run ansible-playbook in loop
 for ITEM in $INVENTORY; do
     I_FILE=`find inventories/${ITEM} -name "${FIND_INVENTORY_FILE}" -type f`
-    ansible-playbook -i ${I_FILE} "${args[@]}" | tee ${OUT_DIR}/${i}_${ITEM}.out
+    ansible-playbook ${VAULT_ARGS} -i ${I_FILE} "${args[@]}" | tee ${OUT_DIR}/${i}_${ITEM}.out
     i=$((i+1))
 done
 
